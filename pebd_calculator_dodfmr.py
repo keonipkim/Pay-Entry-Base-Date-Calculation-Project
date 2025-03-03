@@ -29,7 +29,8 @@ class PEBDCalculator:
         tk.Button(root, text="Add Creditable Service Period", command=self.add_service_period).grid(row=5, column=0, columnspan=2, pady=5)
         tk.Button(root, text="Add Time Lost Period", command=self.add_lost_period).grid(row=6, column=0, columnspan=2, pady=5)
         tk.Button(root, text="Add DEP Service", command=self.add_dep_service).grid(row=7, column=0, columnspan=2, pady=5)
-        tk.Button(root, text="Calculate PEBD", command=self.calculate_pebd).grid(row=8, column=0, columnspan=2, pady=10)
+        tk.Button(root, text="Calculate PEBD", command=self.calculate_pebd).grid(row=8, column=0, pady=10)
+        tk.Button(root, text="Reset", command=self.reset).grid(row=8, column=1, pady=10)
 
     def create_label_entry(self, label_text, row):
         tk.Label(self.root, text=label_text).grid(row=row, column=0, sticky="e", padx=5, pady=5)
@@ -90,18 +91,14 @@ class PEBDCalculator:
             dep_cutoff_1989 = datetime(1989, 11, 29)
 
             if start_dt < dep_start_1985:
-                # Pre-1985: Always creditable
                 self.date_periods.append((start, end))
                 print(f"DEP service {start} to {end} added (pre-1985, creditable).")
             elif dep_start_1985 <= start_dt < dep_cutoff_1989:
-                # 1985–1989: Not creditable
                 print(f"DEP service {start} to {end} not added (1985–1989, not creditable).")
             elif start_dt >= dep_cutoff_1989 and idt == "Yes":
-                # Post-Nov 28, 1989: Creditable only with IDT
                 self.date_periods.append((start, end))
                 print(f"DEP service {start} to {end} added (post-1989, IDT performed).")
             else:
-                # Post-Nov 28, 1989: Not creditable without IDT
                 print(f"DEP service {start} to {end} not added (post-1989, no IDT).")
             window.destroy()
         except ValueError:
@@ -112,10 +109,8 @@ class PEBDCalculator:
         d2 = datetime.strptime(end_date, '%Y-%m-%d')
         if d2.day == 31:
             d2 = d2.replace(day=30)
-        elif d2.month == 2 and d2.day == 29:
-            d2 = d2.replace(day=30)
-        elif d2.month == 2 and d2.day == 28 and not (d2.year % 4 == 0 and (d2.year % 100 != 0 or d2.year % 400 == 0)):
-            d2 = d2.replace(day=30)
+        elif d2.month == 2 and d2.day == 29 and not (d2.year % 4 == 0 and (d2.year % 100 != 0 or d2.year % 400 == 0)):
+            d2 = d2.replace(day=28)  # Non-leap year Feb 29 -> 28
         return (d2 - d1).days + 1
 
     def calculate_total_inclusive_days(self, periods):
@@ -147,10 +142,8 @@ class PEBDCalculator:
         end = datetime.strptime(end_date, '%Y-%m-%d')
         if end.day == 31:
             end = end.replace(day=30)
-        elif end.month == 2 and end.day == 29:
-            end = end.replace(day=30)
-        elif end.month == 2 and end.day == 28 and not (end.year % 4 == 0 and (end.year % 100 != 0 or end.year % 400 == 0)):
-            end = end.replace(day=30)
+        elif end.month == 2 and end.day == 29 and not (end.year % 4 == 0 and (end.year % 100 != 0 or end.year % 400 == 0)):
+            end = end.replace(day=28)
 
         years = end.year - start.year
         months = end.month - start.month
@@ -172,17 +165,17 @@ class PEBDCalculator:
     def total_days_to_ymd(self, total_days):
         years = total_days // 365
         remaining_days = total_days % 365
-        months = remaining_days // 30
-        days = remaining_days % 30
-        leap_adjust = years // 4
-        if remaining_days >= leap_adjust:
-            days += leap_adjust
-            if days >= 30:
-                months += days // 30
-                days = days % 30
-            if months >= 12:
-                years += months // 12
-                months = months % 12
+        # Count actual leap days in the period (approximation)
+        leap_days = years // 4 - years // 100 + years // 400
+        adjusted_days = remaining_days - leap_days
+        if adjusted_days < 0:
+            years -= 1
+            adjusted_days += 365
+        months = adjusted_days // 30
+        days = adjusted_days % 30
+        if months >= 12:
+            years += months // 12
+            months %= 12
         return f"{years:02d} Years, Months {months:02d}, Days {days:02d}"
 
     def calculate_pebd(self):
@@ -193,8 +186,10 @@ class PEBDCalculator:
             reentry_date = self.entries["Reentry Date"].get()
             member_type = self.member_type.get()
 
+            # Validate non-empty dates
             for date in [doeaf, first_active_duty, eos, reentry_date]:
-                datetime.strptime(date, '%Y-%m-%d')
+                if date:
+                    datetime.strptime(date, '%Y-%m-%d')
 
             total_service_days = self.calculate_total_inclusive_days(self.date_periods) if self.date_periods else 0
             total_lost_days = self.calculate_lost_time(self.lost_periods) if self.lost_periods else 0
@@ -212,28 +207,50 @@ class PEBDCalculator:
                 print(f"\nBreak in service (Reentry {reentry_date} > EOS {eos} + 24 hours). "
                       f"PEBD = Reentry Date - Net Creditable Service Days.")
 
-            print(f"Total service days: {self.total_days_to_ymd(total_service_days)}")
-            print(f"Time Lost days (30-day month basis): {self.total_days_to_ymd(total_lost_days)}")
-            print(f"Net creditable service days: {self.total_days_to_ymd(net_service_days)}")
-            print(f"Pay Entry Base Date (PEBD): {pebd}")
-            print(f"DOEAF: {doeaf}")
-            print(f"EOS: {eos}")
-            print(f"1st Day of Active Duty: {first_active_duty}")
-            print(f"Reentry Date: {reentry_date}")
-            print(f"Member Type: {member_type}")
+            result_text = (
+                f"Total service days: {self.total_days_to_ymd(total_service_days)}\n"
+                f"Time Lost days (30-day month basis): {self.total_days_to_ymd(total_lost_days)}\n"
+                f"Net creditable service days: {self.total_days_to_ymd(net_service_days)}\n"
+                f"Pay Entry Base Date (PEBD): {pebd}\n"
+                f"DOEAF: {doeaf}\n"
+                f"EOS: {eos}\n"
+                f"1st Day of Active Duty: {first_active_duty}\n"
+                f"Reentry Date: {reentry_date}\n"
+                f"Member Type: {member_type}\n"
+            )
             if self.date_periods:
-                print("Creditable Service Periods (including DEP if applicable):")
+                result_text += "Creditable Service Periods (including DEP if applicable):\n"
                 for i, (start, end) in enumerate(self.date_periods, 1):
-                    print(f"  Period {i}: {start} to {end} ({self.days_to_ymd(start, end)})")
+                    result_text += f"  Period {i}: {start} to {end} ({self.days_to_ymd(start, end)})\n"
             if self.lost_periods:
-                print("Time Lost Periods:")
+                result_text += "Time Lost Periods:\n"
                 for i, (start, end) in enumerate(self.lost_periods, 1):
-                    print(f"  Lost Period {i}: {start} to {end} ({self.days_to_ymd(start, end)})")
+                    result_text += f"  Lost Period {i}: {start} to {end} ({self.days_to_ymd(start, end)})\n"
 
-        except ValueError:
-            messagebox.showerror("Error", "Invalid date format. Use 'YYYY-MM-DD'.")
+            # Show results in a popup window instead of just printing
+            self.show_results(result_text)
+
+        except ValueError as ve:
+            messagebox.showerror("Error", f"Invalid date format: {ve}. Use 'YYYY-MM-DD'.")
         except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {e}")
+            messagebox.showerror("Error", f"Calculation error: {e}")
+
+    def show_results(self, results_text):
+        result_window = tk.Toplevel(self.root)
+        result_window.title("PEBD Calculation Results")
+        text_area = tk.Text(result_window, height=15, width=80)
+        text_area.pack(padx=5, pady=5)
+        text_area.insert(tk.END, results_text)
+        text_area.config(state='disabled')  # Make read-only
+
+    def reset(self):
+        """Reset all fields and stored data for a new calculation."""
+        for entry in self.entries.values():
+            entry.delete(0, tk.END)
+        self.member_type.set("Enlisted")
+        self.date_periods.clear()
+        self.lost_periods.clear()
+        print("Calculator reset for new calculation.")
 
 if __name__ == "__main__":
     root = tk.Tk()
